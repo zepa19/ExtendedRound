@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -39,9 +40,10 @@ namespace ExtendedRound
         {
             Y = r._Ride.EndY;
             X = r._Ride.EndX;
-            CarTime += r.ApproachDistance + r._Ride.Distance;
+            CarTime += r.TimeOfDrive;
             Rides.Add(r._Ride.ID);
             Program.Atlas.RemoveRide(r._Ride.StartY, r._Ride.StartX, r._Ride);
+            Program._Points.Remove(r._point);
             if(CarTime >= Program.T)
                 EndRun();
         }
@@ -73,16 +75,41 @@ namespace ExtendedRound
         // public int TimeWasted; przy sprawdzaniu sie sprzyda, ale w klasie Map !!!!!!!!!!!!!!!!!!!!!!!
         public Ride _Ride;
         public bool Bonus;
+        public Points _point;
+        public int waitTime;
+        public double TimeProportion;
 
-        public ResContainer(int ApproachDistance, Ride _Ride, bool Bonus)
+        public ResContainer(int ApproachDistance, Ride _Ride, bool Bonus, Points Point, int waitTime)
         {
+            this.waitTime = waitTime;
             this.ApproachDistance = ApproachDistance;
             this._Ride = _Ride;
             this.Bonus = Bonus;
-            this.TimeOfDrive = ApproachDistance + _Ride.Distance;
+            this.TimeOfDrive = ApproachDistance + _Ride.Distance + this.waitTime;
             this.PointsEarned = _Ride.Distance;
+            this._point = Point;
+
             if (Bonus)
                 this.PointsEarned += Program.B;
+
+            TimeProportion = (double)this.TimeOfDrive / (double)(ApproachDistance + waitTime);
+
+        }
+
+        public ResContainer(ResContainer rold, int minretdist)
+        {
+            waitTime = rold.waitTime;
+            ApproachDistance = rold.ApproachDistance;
+            _Ride = rold._Ride;
+            Bonus = rold.Bonus;
+            TimeOfDrive = ApproachDistance + _Ride.Distance + waitTime;
+            PointsEarned = _Ride.Distance;
+            _point = rold._point;
+
+            if (Bonus)
+                this.PointsEarned += Program.B;
+
+            TimeProportion = (double)this.TimeOfDrive / (double)(ApproachDistance + waitTime + minretdist);
         }
     }
 
@@ -136,25 +163,32 @@ namespace ExtendedRound
             return true;
         }
 
-        List<Points> GetNextPoints(int ys, int xs, int c)
+        List<Points> GetNextPoints(int ys, int xs)
         {
             List<Points> points = new List<Points>();
             int a, b;
-
-            for (int i = -c; i <= c; i++) 
+            
+            for (int c = 0; c < Program.Atlas.R + Program.Atlas.C; c++)
             {
-                for (int j = -c; j <= c; j++)
+                for (int i = -c; i <= c; i++)
                 {
-                    if (Math.Abs(i) + Math.Abs(j) == c)
+                    for (int j = -c; j <= c; j++)
                     {
-                        a = ys + i;
-                        b = xs + j;
-                        if (a >= 0 && b >= 0 && a < Program.Atlas.R && b < Program.Atlas.C)
+                        if (Math.Abs(i) + Math.Abs(j) == c)
                         {
-                            if(Program.Atlas._Map[a, b].Count != 0)
-                                points.Add(new Points(ys + i, xs + j));
+                            a = ys + i;
+                            b = xs + j;
+                            if (a >= 0 && b >= 0 && a < Program.Atlas.R && b < Program.Atlas.C)
+                            {
+                                if (Program.Atlas._Map[a, b].Count != 0)
+                                {
+                                    points.Add(new Points(ys + i, xs + j));
+                                    if (points.Count == 10)
+                                        return points;
+                                }
+                            }
+
                         }
-                            
                     }
                 }
             }
@@ -162,68 +196,66 @@ namespace ExtendedRound
             return points;
         }
 
-        public List<ResContainer> FindBestRidesFromPos(int Y, int X, int CurrentTime, int TimeToEnd, Ride SkipRide) 
+        public List<ResContainer> FindBestRidesFromPos(int Y, int X, int CurrentTime, int TimeToEnd, Ride SkipRide, out int MinApproachDistance) 
         {
             List<ResContainer> Results = new List<ResContainer>();
-            int ApproachTime = 0, RidesChecked = 0;
-            List<Points> _Points;
+            int ApproachTime = 0, RidesChecked = 0, temp, waitTime;
+            MinApproachDistance = Program.Atlas.R + Program.Atlas.C;
 
-            while (true)
+            foreach (Points Point in Program._Points)
             {
-                _Points = GetNextPoints(Y, X, ApproachTime);
-
-                if (TimeToEnd <= ApproachTime)
-                    break;
-
-                if (_Points.Count == 0)
+                if (_Map[Point.Y, Point.X].Count != 0)
                 {
-                    ApproachTime++;
-                    continue;
-                }
-
-                if (RidesChecked >= Program.N)
-                {
-                    goto AfterLoop;
-                }
-
-                foreach (Points Point in _Points)
-                {
-                    if (_Map[Point.Y, Point.X].Count != 0)
+                    foreach (Ride _ride in _Map[Point.Y, Point.X])
                     {
-                        foreach (Ride _ride in _Map[Point.Y, Point.X])
+                        RidesChecked++;
+
+                        if (_ride.Equals(SkipRide))
+                            continue;
+
+                        ApproachTime = Math.Abs(Y - Point.Y) + Math.Abs(X - Point.X);
+                        temp = ApproachTime + CurrentTime;
+                        waitTime = _ride.EarliestStart - temp;
+
+                        if (ApproachTime < MinApproachDistance)
+                            MinApproachDistance = ApproachTime;
+
+                        if (waitTime < 0)
+                            waitTime = 0;
+
+                        if (_ride.LatestFinish <= CurrentTime + ApproachTime + _ride.Distance + waitTime)
+                            continue;
+
+                        if (ApproachTime >= TimeToEnd)
+                            goto AfterLoop;
+
+                        if (TimeToEnd >= ApproachTime + _ride.Distance)
                         {
-                            RidesChecked++;
-
-                            if (_ride.Equals(SkipRide))
-                                continue;
-
-                            if (TimeToEnd >= ApproachTime + _ride.Distance)
-                            {
-                                if (ApproachTime + CurrentTime == _ride.EarliestStart)
-                                    Results.Add(new ResContainer(ApproachTime, _ride, true));
-                                else
-                                    Results.Add(new ResContainer(ApproachTime, _ride, false));
-                            }
                             
-                            if(RidesChecked >= Program.N)
-                            {
-                                goto AfterLoop;
-                            }
+                            if (temp == _ride.EarliestStart)
+                                Results.Add(new ResContainer(ApproachTime, _ride, true, Point, 0));
+                            else if(temp < _ride.EarliestStart && _ride.EarliestStart - Program.B >= temp)
+                                Results.Add(new ResContainer(ApproachTime, _ride, true, Point, waitTime));
+                            else
+                                Results.Add(new ResContainer(ApproachTime, _ride, false, Point, 0));
+                        }
+                            
+                        if(RidesChecked >= Program.N)
+                        {
+                            goto AfterLoop;
                         }
                     }
                 }
-                
-                if (Results.Count >= 5)
-                    break;
-
-                ApproachTime++;
             }
 
             AfterLoop:
 
-            Results.Sort((a, b) => a.PointsEarned.CompareTo(b.PointsEarned)); 
+            Results.Sort((a, b) => b.TimeProportion.CompareTo(a.TimeProportion));
 
-            return Results;
+            if (Results.Count < 6)
+                return Results;
+
+            return new List<ResContainer> { Results[0], Results[1], Results[2], Results[3], Results[4] };
 
         }
 
@@ -246,11 +278,15 @@ namespace ExtendedRound
         {
             List<ResContainer> PossibleRides, PossibleRidesFromAnotherPossibleRide, BestPossibleRides;
             int tmp;
+            int MinimumReturnDistance;
 
-            foreach(Car c in Program.Cars)
+            Program._Points.Sort((a, b) => (a.Y + a.X).CompareTo(b.Y + b.X));
+
+            foreach (Car c in Program.Cars)
             {
-                Console.WriteLine("##### Debug #####\nFinding {0} route to car{1}\n", c.Rides.Count + 1, c.ID);
-                PossibleRides = FindBestRidesFromPos(c.Y, c.X, c.CarTime, Program.T - c.CarTime, null);
+                //Console.WriteLine("##### Debug #####\nFinding {0} route to car{1}\n", c.Rides.Count + 1, c.ID);
+
+                PossibleRides = FindBestRidesFromPos(c.Y, c.X, c.CarTime, Program.T - c.CarTime, null, out MinimumReturnDistance);
 
                 if (PossibleRides.Count == 0)
                 {
@@ -264,11 +300,11 @@ namespace ExtendedRound
                 foreach (ResContainer _ResCont in PossibleRides)
                 {
                     tmp = c.CarTime + _ResCont.TimeOfDrive;
-                    PossibleRidesFromAnotherPossibleRide = FindBestRidesFromPos(_ResCont._Ride.EndY, _ResCont._Ride.EndX, tmp, Program.T - tmp, _ResCont._Ride);
+                    PossibleRidesFromAnotherPossibleRide = FindBestRidesFromPos(_ResCont._Ride.EndY, _ResCont._Ride.EndX, tmp, Program.T - tmp, _ResCont._Ride, out MinimumReturnDistance);
 
                     if (PossibleRidesFromAnotherPossibleRide.Count != 0)
                     {
-                        BestPossibleRides.Add(_ResCont);
+                        BestPossibleRides.Add(new ResContainer(_ResCont, MinimumReturnDistance));
                     }
                 }
 
@@ -290,19 +326,21 @@ namespace ExtendedRound
 
         public void GenerateRoute()
         {
-
+            //Stopwatch watch = new Stopwatch();
             GenerateRouteFirstTime();
 
             List<ResContainer> PossibleRides, PossibleRidesFromAnotherPossibleRide, BestPossibleRides;
-            int tmp; 
+            int tmp, MinimumReturnDistance; 
             
             while(Program.CheckIfAnyCar() && !CheckIfEmpty())
             {
-                //Console.WriteLine("qwec");
                 if (GetNextCar(out Car c))
                 {
-                    Console.WriteLine("##### Debug #####\nFinding {0} route to car{1}\n", c.Rides.Count + 1, c.ID);
-                    PossibleRides = FindBestRidesFromPos(c.Y, c.X, c.CarTime, Program.T - c.CarTime, null);
+                    //Console.WriteLine("##### Debug #####\nFinding {0} route to car{1}\n", c.Rides.Count + 1, c.ID);
+
+                    Program._Points.Sort((a, b) => (Math.Abs(c.Y - a.Y) + Math.Abs(c.X - a.X)).CompareTo(Math.Abs(c.Y - b.Y) + Math.Abs(c.X - b.X)));
+
+                    PossibleRides = FindBestRidesFromPos(c.Y, c.X, c.CarTime, Program.T - c.CarTime, null, out MinimumReturnDistance);
                         
                     if(PossibleRides.Count == 0)
                     {
@@ -316,11 +354,11 @@ namespace ExtendedRound
                     foreach (ResContainer _ResCont in PossibleRides)
                     {
                         tmp = c.CarTime + _ResCont.TimeOfDrive;
-                        PossibleRidesFromAnotherPossibleRide = FindBestRidesFromPos(_ResCont._Ride.EndY, _ResCont._Ride.EndX, tmp, Program.T - tmp, _ResCont._Ride);
+                        PossibleRidesFromAnotherPossibleRide = FindBestRidesFromPos(_ResCont._Ride.EndY, _ResCont._Ride.EndX, tmp, Program.T - tmp, _ResCont._Ride, out MinimumReturnDistance);
 
                         if(PossibleRidesFromAnotherPossibleRide.Count != 0)
                         {
-                            BestPossibleRides.Add(_ResCont);
+                            BestPossibleRides.Add(new ResContainer(_ResCont, MinimumReturnDistance));
                         }
                     }
 
@@ -336,7 +374,12 @@ namespace ExtendedRound
                     
                 }
 
+                //watch.Start();
                 Program.Cars.Sort((a, b) => a.CarTime.CompareTo(b.CarTime));
+                //watch.Stop();
+
+                //Console.WriteLine("Czas sortowania: {0}ms", watch.ElapsedMilliseconds);
+                //Console.ReadKey();
             }
         }
     }
@@ -349,6 +392,7 @@ namespace ExtendedRound
         public static int B = 0, T = 0, N = 0;
         public static List<Car> Cars = new List<Car>();
         public static Map Atlas;
+        public static List<Points> _Points = new List<Points>();
 
         static void Main(string[] args)
         {
@@ -459,6 +503,7 @@ namespace ExtendedRound
                 y = Int32.Parse(parameters[0]);
                 x = Int32.Parse(parameters[1]);
 
+                _Points.Add(new Points(y, x));
                 Atlas._Map[y, x].Add(new Ride(y, x, Int32.Parse(parameters[2]), Int32.Parse(parameters[3]), Int32.Parse(parameters[4]), Int32.Parse(parameters[5])));
             }
 
